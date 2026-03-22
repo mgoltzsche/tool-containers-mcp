@@ -1,0 +1,41 @@
+package config
+
+import (
+	"time"
+)
+
+type ParameterType string
+
+const (
+	ParameterTypeString ParameterType = "string"
+	ParameterTypeNumber ParameterType = "number"
+	// TODO: support integer parameter type additionally?
+	ParameterTypeBoolean ParameterType = "boolean"
+)
+
+type Configuration struct {
+	Tools map[string]ToolDefinition `yaml:"tools"`
+}
+
+type ToolDefinition struct {
+	Description string      `yaml:"description"`
+	Parameters  []Parameter `yaml:"parameters,omitempty"`
+	Container   Container   `yaml:"container"`
+}
+
+type Container struct {
+	Image   string            `yaml:"image"`
+	Command string            `yaml:"command,omitempty"`
+	Args    []string          `yaml:"args,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
+	Timeout time.Duration     `yaml:"timeout,omitempty"`
+}
+
+type Parameter struct {
+	Name        string        `yaml:"name"`
+	Description string        `yaml:"description"`
+	Type        ParameterType `yaml:"type,omitempty"`
+	MinValue    *float64      `yaml:"minValue,omitempty"`
+	MaxValue    *float64      `yaml:"maxValue,omitempty"`
+	Required    *bool         `yaml:"required,omitempty"`
+}

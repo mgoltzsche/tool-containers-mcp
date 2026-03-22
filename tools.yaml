@@ -1,0 +1,35 @@
+# Example tool configuration of the tool-containers-mcp server.
+# The MCP server exposes the configured tools to connected LLMs.
+# Each tool call is run within a separate Linux container that is started by the MCP server.
+tools:
+  websearch:
+    description: Search the web for a given query.
+    parameters:
+      - name: rationale
+        description: The rationale for calling this tool with these parameters.
+      - name: query
+        description: The query keywords to search the web for.
+    container:
+      # DuckDuckGo search
+      image: jaymoulin/ddgr:v2.2
+      command: /bin/sh
+      args:
+        - -euc
+        - ddgr --noprompt "$PARAMETER_QUERY"
+  wikipedia:
+    description: Search Wikipedia for a given name.
+    parameters:
+      - name: rationale
+        description: The rationale for calling this tool with these parameters.
+      - name: query
+        description: The name of the thing to search on Wikipedia.
+    container:
+      # Using yq instead of jq here since official jq image doesn't ship curl/wget
+      image: mikefarah/yq:4
+      command: /bin/sh
+      args:
+        - -euc
+        - |
+          QUERY="$(yq eval -n 'strenv(PARAMETER_QUERY) | @uri')"
+          RESPONSE="$(wget -qO - "https://en.wikipedia.org/w/api.php?format=json&action=query&titles=$QUERY&prop=extracts&explaintext=true")"
+          echo "$RESPONSE" | yq eval -e '.query.pages.*.extract'

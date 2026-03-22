@@ -1,0 +1,30 @@
+version: "2"
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+    - rowserrcheck
+    - gosec
+    - unconvert
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - /build$
+      - /vendor$
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - /build$
+      - /vendor$
+

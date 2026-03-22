@@ -1,0 +1,4 @@
+/build
+/tool-containers-mcp
+cmd/*/*
+!cmd/*/*.go

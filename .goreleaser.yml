@@ -1,0 +1,59 @@
+version: 2
+project_name: tool-containers-mcp
+dist: ./build/dist
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - id: tool-containers-mcp
+    main: ./cmd/tool-containers-mcp
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - darwin_amd64
+      - darwin_arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -extldflags '-static' -X main.version={i{.Version}}
+archives:
+  - formats: ['binary']
+    name_template: '{{.ProjectName}}-{{.Os}}-{{.Arch}}'
+    files:
+      - tools.yaml
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  version_template: '{{ incpatch .Version }}-dev-{{.ShortCommit}}'
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs(\([^)]+\))?:'
+      - '^test(\([^)]+\))?:'
+      - '^chore(\([^)]+\))?:'
+dockers_v2:
+  - images:
+      - docker.io/mgoltzsche/tool-containers-mcp
+      - ghcr.io/mgoltzsche/tool-containers-mcp
+    tags:
+      - latest
+      - "{{.Major}}"
+      - "{{.Version}}"
+    dockerfile: Dockerfile
+    ids:
+      - tool-containers-mcp
+    extra_files:
+      - tools.yaml
+    sbom: false
+    labels:
+      "org.opencontainers.image.description": "An MCP server to define tools as short-lived containers."
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.name": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{.GitURL}}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+
