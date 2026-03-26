@@ -31,6 +31,8 @@ jobs:
     - id: release
       name: Prepare release
       uses: mgoltzsche/conventional-release@v0
+      with:
+        skip-tag-push: true
 
     - name: Set up Go
       uses: actions/setup-go@v6
