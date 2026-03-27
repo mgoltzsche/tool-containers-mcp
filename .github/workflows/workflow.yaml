@@ -32,6 +32,7 @@ jobs:
       name: Prepare release
       uses: mgoltzsche/conventional-release@v0
       with:
+        # skip, goreleaser takes care of tag push and github release creation
         tag-push-enabled: false
         github-release-enabled: false
 
