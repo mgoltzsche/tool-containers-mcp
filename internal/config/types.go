@@ -7,9 +7,9 @@ import (
 type ParameterType string
 
 const (
-	ParameterTypeString ParameterType = "string"
-	ParameterTypeNumber ParameterType = "number"
-	// TODO: support integer parameter type additionally?
+	ParameterTypeString  ParameterType = "string"
+	ParameterTypeNumber  ParameterType = "number"
+	ParameterTypeInteger ParameterType = "integer"
 	ParameterTypeBoolean ParameterType = "boolean"
 )
 

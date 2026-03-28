@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,18 +16,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/mgoltzsche/tool-containers-mcp/internal/config"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type Tool struct {
+	Tool    *mcp.Tool
+	Handler mcp.ToolHandler
+}
 
 var nameNormalizationRegex = regexp.MustCompile("[^a-zA-Z0-6]+")
 
-func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]server.ServerTool, error) {
-	tools := make([]server.ServerTool, 0, len(toolDefs))
+func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]Tool, error) {
+	tools := make([]Tool, 0, len(toolDefs))
 	toolNames := slices.Sorted(maps.Keys(toolDefs))
 
 	if len(toolDefs) == 0 {
@@ -46,18 +52,25 @@ func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]server.Serve
 			return nil, errors.New("no description specified for tool definition")
 		}
 
-		params := make([]mcp.ToolOption, len(t.Parameters)+1)
-		params[0] = mcp.WithDescription(t.Description)
+		inputSchema := &jsonschema.Schema{
+			Type:       "object",
+			Properties: map[string]*jsonschema.Schema{},
+		}
+
 		paramNames := make(map[string]struct{}, len(t.Parameters))
 
-		for j, p := range t.Parameters {
+		for _, p := range t.Parameters {
 			if p.Name == "" {
 				return nil, fmt.Errorf("tool %s defines a parameter without a name", toolName)
 			}
 
-			param, err := toMCPParameter(p)
+			paramSchema, err := toMCPParameterSchema(p)
 			if err != nil {
 				return nil, fmt.Errorf("tool %s parameter %s: %w", toolName, p.Name, err)
+			}
+
+			if p.Required == nil || *p.Required {
+				inputSchema.Required = append(inputSchema.Required, p.Name)
 			}
 
 			if _, exists := paramNames[p.Name]; exists {
@@ -66,11 +79,15 @@ func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]server.Serve
 
 			paramNames[p.Name] = struct{}{}
 
-			params[j+1] = param
+			inputSchema.Properties[p.Name] = paramSchema
 		}
 
-		tools = append(tools, server.ServerTool{
-			Tool:    mcp.NewTool(toolName, params...),
+		tools = append(tools, Tool{
+			Tool: &mcp.Tool{
+				Name:        toolName,
+				Description: t.Description,
+				InputSchema: inputSchema,
+			},
 			Handler: toolHandler(toolName, t),
 		})
 	}
@@ -78,40 +95,46 @@ func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]server.Serve
 	return tools, nil
 }
 
-func toMCPParameter(p config.Parameter) (mcp.ToolOption, error) {
+func toMCPParameterSchema(p config.Parameter) (*jsonschema.Schema, error) {
 	if p.Description == "" {
 		return nil, errors.New("no parameter description specified")
 	}
 
-	opts := make([]mcp.PropertyOption, 1, 4)
-	opts[0] = mcp.Description(p.Description)
-
-	if p.Required == nil || *p.Required {
-		opts = append(opts, mcp.Required())
-	}
+	schema := &jsonschema.Schema{Description: p.Description}
 
 	if p.MinValue != nil {
-		opts = append(opts, mcp.Min(*p.MinValue))
+		schema.Minimum = p.MinValue
 	}
 
 	if p.MaxValue != nil {
-		opts = append(opts, mcp.Max(*p.MaxValue))
+		schema.Maximum = p.MaxValue
 	}
 
 	switch p.Type {
 	case config.ParameterTypeString, "":
-		return mcp.WithString(p.Name, opts...), nil
+		schema.Type = "string"
+	case config.ParameterTypeInteger:
+		schema.Type = "integer"
 	case config.ParameterTypeNumber:
-		return mcp.WithNumber(p.Name, opts...), nil
+		schema.Type = "number"
 	case config.ParameterTypeBoolean:
-		return mcp.WithBoolean(p.Name, opts...), nil
+		schema.Type = "boolean"
 	default:
-		return nil, fmt.Errorf("unsupported parameter type %q provided, expected one of string, number or boolean", p.Type)
+		return nil, fmt.Errorf("unsupported parameter type %q provided, expected one of string, integer, number or boolean", p.Type)
+	}
+
+	return schema, nil
+}
+
+func toolError(msg string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		IsError: true,
 	}
 }
 
-func toolHandler(toolName string, tool config.ToolDefinition) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func toolHandler(toolName string, tool config.ToolDefinition) mcp.ToolHandler {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		c := tool.Container
 
 		env := make([]string, 0, len(c.Env)+len(tool.Parameters))
@@ -121,7 +144,7 @@ func toolHandler(toolName string, tool config.ToolDefinition) server.ToolHandler
 
 		paramEnvVars, err := paramsToEnvVars(tool.Parameters, request)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return toolError(err.Error()), nil
 		}
 
 		env = append(env, paramEnvVars...)
@@ -189,7 +212,7 @@ func toolHandler(toolName string, tool config.ToolDefinition) server.ToolHandler
 			}
 		case result := <-waitResult.Result:
 			if result.StatusCode != 0 {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to use %s tool: exited with %d%s", toolName, result.StatusCode, errDetails(ctx, resp.ID, cli))), nil
+				return toolError(fmt.Sprintf("failed to use %s tool: exited with %d%s", toolName, result.StatusCode, errDetails(ctx, resp.ID, cli))), nil
 			}
 		}
 
@@ -213,7 +236,9 @@ func toolHandler(toolName string, tool config.ToolDefinition) server.ToolHandler
 			}
 		}
 
-		return mcp.NewToolResultText(strings.TrimSpace(stdout.String())), nil
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(stdout.String())}},
+		}, nil
 	}
 }
 
@@ -232,38 +257,44 @@ func errDetails(ctx context.Context, containerID string, c *client.Client) strin
 	return suffix
 }
 
-func paramsToEnvVars(paramDefinitions []config.Parameter, request mcp.CallToolRequest) ([]string, error) {
+func paramsToEnvVars(paramDefinitions []config.Parameter, request *mcp.CallToolRequest) ([]string, error) {
 	env := make([]string, len(paramDefinitions))
-	args := request.GetArguments()
+	args := map[string]any{}
+	err := json.Unmarshal(request.Params.Arguments, &args)
+	if err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
 
 	for i, p := range paramDefinitions {
 		var v string
-
-		switch p.Type {
-		case config.ParameterTypeNumber:
-			if _, ok := args[p.Name]; ok {
-				f, err := request.RequireFloat(p.Name)
-				if err != nil {
-					return nil, err
+		arg, ok := args[p.Name]
+		if ok {
+			switch p.Type {
+			case config.ParameterTypeInteger:
+				i, ok := arg.(int64)
+				if !ok {
+					return nil, fmt.Errorf("param %s value of type %T provided, expected integer", p.Name, arg)
+				}
+				v = strconv.FormatInt(i, 10)
+			case config.ParameterTypeNumber:
+				f, ok := arg.(float64)
+				if !ok {
+					return nil, fmt.Errorf("param %s value of type %T provided, expected number", p.Name, arg)
 				}
 				v = strconv.FormatFloat(f, 'f', -1, 64)
-			}
-		case config.ParameterTypeBoolean:
-			if _, ok := args[p.Name]; ok {
-				b, err := request.RequireBool(p.Name)
-				if err != nil {
-					return nil, err
+			case config.ParameterTypeBoolean:
+				b, ok := arg.(bool)
+				if !ok {
+					return nil, fmt.Errorf("param %s value of type %T provided, expected number", p.Name, arg)
 				}
 				v = strconv.FormatBool(b)
+			default:
+				v = fmt.Sprintf("%v", arg)
 			}
-		default:
-			if s, ok := args[p.Name]; ok {
-				v = fmt.Sprintf("%v", s)
+		} else {
+			if p.Required == nil || *p.Required {
+				return nil, fmt.Errorf("required parameter '%s' was not specified", p.Name)
 			}
-		}
-
-		if v == "" && (p.Required == nil || *p.Required) {
-			return nil, fmt.Errorf("required parameter '%s' was not specified", p.Name)
 		}
 
 		name := strings.ToUpper(nameNormalizationRegex.ReplaceAllString(p.Name, "_"))
