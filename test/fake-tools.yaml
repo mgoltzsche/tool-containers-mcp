@@ -1,0 +1,40 @@
+# Tool configuration used by the e2e test.
+tools:
+  fake-tool-1:
+    description: Dummy tool 1
+    parameters:
+      string-1:
+        description: String parameter
+      integer-1:
+        description: Integer parameter
+        type: integer
+      number-1:
+        description: Number parameter
+        type: number
+      boolean-1:
+        description: Boolean parameter
+        type: boolean
+    container:
+      image: alpine:3.23
+      command: /bin/sh
+      args:
+        - -euxc
+        - |
+          [ "$PARAM_STRING_1" = "string value1" ]
+          [ "$PARAM_INTEGER_1" = "3" ]
+          [ "$PARAM_NUMBER_1" = "1.5" ]
+          [ "$PARAM_BOOLEAN_1" = "true" ]
+          echo "fake tool result"
+  fake-tool-2:
+    description: Dummy tool 2
+    parameters:
+      query:
+        description: String parameter
+        type: string
+    container:
+      image: alpine:3.23
+      command: /bin/sh
+      args:
+        - -euc
+        - |
+          echo hello world

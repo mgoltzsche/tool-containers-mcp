@@ -274,11 +274,11 @@ func paramsToEnvVars(paramDefinitions map[string]config.Parameter, request *mcp.
 		if ok {
 			switch p.Type {
 			case config.ParameterTypeInteger:
-				i, ok := arg.(int64)
+				i, ok := arg.(float64)
 				if !ok {
 					return nil, fmt.Errorf("param %s value of type %T provided, expected integer", name, arg)
 				}
-				v = strconv.FormatInt(i, 10)
+				v = strconv.FormatInt(int64(i), 10)
 			case config.ParameterTypeNumber:
 				f, ok := arg.(float64)
 				if !ok {

@@ -14,7 +14,7 @@ func TestMCP(t *testing.T) {
 	transport := &mcp.CommandTransport{Command: exec.Command(
 		// TODO: make this work without having to rely on externally built binary
 		//"go", "run", filepath.Join("..", "cmd", "tool-containers-mcp", "main.go", "--config=tools.yaml"),
-		"../build/dist/tool-containers-mcp", "--config=../tools.yaml",
+		"../build/dist/tool-containers-mcp", "--config=fake-tools.yaml",
 	)}
 	session, err := mcpClient.Connect(t.Context(), transport, nil)
 	require.NoError(t, err)
@@ -24,7 +24,7 @@ func TestMCP(t *testing.T) {
 	require.NotNil(t, session.InitializeResult().Capabilities.Tools, "MCP server should support tools")
 
 	t.Run("list tools", func(t *testing.T) {
-		expectedToolNames := []string{"websearch", "wikipedia"}
+		expectedToolNames := []string{"fake-tool-1", "fake-tool-2"}
 		toolNames := make([]string, 0, 10)
 		for tool, err := range session.Tools(t.Context(), nil) {
 			require.NoError(t, err, "Tools()")
@@ -35,16 +35,18 @@ func TestMCP(t *testing.T) {
 
 	t.Run("call tool", func(t *testing.T) {
 		result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
-			Name: "wikipedia",
+			Name: "fake-tool-1",
 			Arguments: map[string]any{
-				"query":     "Futurama",
-				"rationale": "coz I can",
+				"string-1":  "string value1",
+				"integer-1": 3,
+				"number-1":  1.5,
+				"boolean-1": true,
 			},
 		})
 		require.NoError(t, err)
 		require.Equal(t, 1, len(result.Content), "result content length")
 		_, ok := result.Content[0].(*mcp.TextContent)
 		require.True(t, ok, "result entry should be of type mcp.TextContent")
-		require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "Leela", "result content")
+		require.Equal(t, "fake tool result", result.Content[0].(*mcp.TextContent).Text, "result content")
 	})
 }
