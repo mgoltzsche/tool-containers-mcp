@@ -5,24 +5,24 @@ tools:
   websearch:
     description: Search the web for a given query.
     parameters:
-      - name: rationale
-        description: The rationale for calling this tool with these parameters.
-      - name: query
+      query:
         description: The query keywords to search the web for.
+      rationale:
+        description: The rationale for calling this tool with these parameters.
     container:
       # DuckDuckGo search
       image: jaymoulin/ddgr:v2.2
       command: /bin/sh
       args:
         - -euc
-        - ddgr --noprompt "$PARAMETER_QUERY"
+        - ddgr --noprompt "$PARAM_QUERY"
   wikipedia:
     description: Search Wikipedia for a given name.
     parameters:
-      - name: rationale
-        description: The rationale for calling this tool with these parameters.
-      - name: query
+      query:
         description: The name of the thing to search on Wikipedia.
+      rationale:
+        description: The rationale for calling this tool with these parameters.
     container:
       # Using yq instead of jq here since official jq image doesn't ship curl/wget
       image: mikefarah/yq:4
@@ -30,6 +30,6 @@ tools:
       args:
         - -euc
         - |
-          QUERY="$(yq eval -n 'strenv(PARAMETER_QUERY) | @uri')"
+          QUERY="$(yq eval -n 'strenv(PARAM_QUERY) | @uri')"
           RESPONSE="$(wget -qO - "https://en.wikipedia.org/w/api.php?format=json&action=query&titles=$QUERY&prop=extracts&explaintext=true")"
           echo "$RESPONSE" | yq eval -e '.query.pages.*.extract'

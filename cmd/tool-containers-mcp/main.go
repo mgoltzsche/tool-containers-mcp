@@ -18,9 +18,13 @@ import (
 // Version is overwritten by the build with the actual version.
 var Version = "0.0.0-dev"
 
+var errLogged = false
+
 func main() {
 	if err := run(); err != nil {
-		slog.Error(err.Error())
+		if !errLogged {
+			slog.Error(err.Error())
+		}
 		os.Exit(1)
 	}
 }
@@ -86,7 +90,9 @@ func initMCPTools() ([]tools.Tool, error) {
 // Otherwise, when terminating the process immediately, the root cause is not visible for MCP client users since the log messages are not shown.
 func failingMiddleware(err error) mcp.Middleware {
 	slog.Error("failed to initialize tools", "error", err)
+	errLogged = true
 	err = fmt.Errorf("tool-containers-mcp: %w", err)
+
 	return func(h mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			return nil, err

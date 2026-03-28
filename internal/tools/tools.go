@@ -59,27 +59,29 @@ func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]Tool, error)
 
 		paramNames := make(map[string]struct{}, len(t.Parameters))
 
-		for _, p := range t.Parameters {
-			if p.Name == "" {
+		for _, paramName := range slices.Sorted(maps.Keys(t.Parameters)) {
+			if paramName == "" {
 				return nil, fmt.Errorf("tool %s defines a parameter without a name", toolName)
 			}
 
+			p := t.Parameters[paramName]
+
 			paramSchema, err := toMCPParameterSchema(p)
 			if err != nil {
-				return nil, fmt.Errorf("tool %s parameter %s: %w", toolName, p.Name, err)
+				return nil, fmt.Errorf("tool %s parameter %s: %w", toolName, paramName, err)
 			}
 
 			if p.Required == nil || *p.Required {
-				inputSchema.Required = append(inputSchema.Required, p.Name)
+				inputSchema.Required = append(inputSchema.Required, paramName)
 			}
 
-			if _, exists := paramNames[p.Name]; exists {
-				return nil, fmt.Errorf("tool %s specifies duplicate parameter %q", toolName, p.Name)
+			if _, exists := paramNames[paramName]; exists {
+				return nil, fmt.Errorf("tool %s specifies duplicate parameter %q", toolName, paramName)
 			}
 
-			paramNames[p.Name] = struct{}{}
+			paramNames[paramName] = struct{}{}
 
-			inputSchema.Properties[p.Name] = paramSchema
+			inputSchema.Properties[paramName] = paramSchema
 		}
 
 		tools = append(tools, Tool{
@@ -257,7 +259,7 @@ func errDetails(ctx context.Context, containerID string, c *client.Client) strin
 	return suffix
 }
 
-func paramsToEnvVars(paramDefinitions []config.Parameter, request *mcp.CallToolRequest) ([]string, error) {
+func paramsToEnvVars(paramDefinitions map[string]config.Parameter, request *mcp.CallToolRequest) ([]string, error) {
 	env := make([]string, len(paramDefinitions))
 	args := map[string]any{}
 	err := json.Unmarshal(request.Params.Arguments, &args)
@@ -265,27 +267,28 @@ func paramsToEnvVars(paramDefinitions []config.Parameter, request *mcp.CallToolR
 		return nil, fmt.Errorf("parse params: %w", err)
 	}
 
-	for i, p := range paramDefinitions {
+	for i, name := range slices.Sorted(maps.Keys(paramDefinitions)) {
+		p := paramDefinitions[name]
 		var v string
-		arg, ok := args[p.Name]
+		arg, ok := args[name]
 		if ok {
 			switch p.Type {
 			case config.ParameterTypeInteger:
 				i, ok := arg.(int64)
 				if !ok {
-					return nil, fmt.Errorf("param %s value of type %T provided, expected integer", p.Name, arg)
+					return nil, fmt.Errorf("param %s value of type %T provided, expected integer", name, arg)
 				}
 				v = strconv.FormatInt(i, 10)
 			case config.ParameterTypeNumber:
 				f, ok := arg.(float64)
 				if !ok {
-					return nil, fmt.Errorf("param %s value of type %T provided, expected number", p.Name, arg)
+					return nil, fmt.Errorf("param %s value of type %T provided, expected number", name, arg)
 				}
 				v = strconv.FormatFloat(f, 'f', -1, 64)
 			case config.ParameterTypeBoolean:
 				b, ok := arg.(bool)
 				if !ok {
-					return nil, fmt.Errorf("param %s value of type %T provided, expected number", p.Name, arg)
+					return nil, fmt.Errorf("param %s value of type %T provided, expected number", name, arg)
 				}
 				v = strconv.FormatBool(b)
 			default:
@@ -293,12 +296,12 @@ func paramsToEnvVars(paramDefinitions []config.Parameter, request *mcp.CallToolR
 			}
 		} else {
 			if p.Required == nil || *p.Required {
-				return nil, fmt.Errorf("required parameter '%s' was not specified", p.Name)
+				return nil, fmt.Errorf("required parameter '%s' was not specified", name)
 			}
 		}
 
-		name := strings.ToUpper(nameNormalizationRegex.ReplaceAllString(p.Name, "_"))
-		env[i] = fmt.Sprintf("PARAMETER_%s=%v", strings.ToUpper(name), v)
+		key := strings.ToUpper(nameNormalizationRegex.ReplaceAllString(name, "_"))
+		env[i] = fmt.Sprintf("PARAM_%s=%v", strings.ToUpper(key), v)
 	}
 
 	return env, nil

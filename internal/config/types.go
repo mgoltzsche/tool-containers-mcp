@@ -18,9 +18,9 @@ type Configuration struct {
 }
 
 type ToolDefinition struct {
-	Description string      `yaml:"description"`
-	Parameters  []Parameter `yaml:"parameters,omitempty"`
-	Container   Container   `yaml:"container"`
+	Description string               `yaml:"description"`
+	Parameters  map[string]Parameter `yaml:"parameters,omitempty"`
+	Container   Container            `yaml:"container"`
 }
 
 type Container struct {
@@ -32,7 +32,6 @@ type Container struct {
 }
 
 type Parameter struct {
-	Name        string        `yaml:"name"`
 	Description string        `yaml:"description"`
 	Type        ParameterType `yaml:"type,omitempty"`
 	MinValue    *float64      `yaml:"minValue,omitempty"`
