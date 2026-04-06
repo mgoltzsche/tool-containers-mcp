@@ -1,0 +1,28 @@
+services:
+  mcp-bridge:
+    image: ghcr.io/secretiveshell/mcp-bridge/mcp-bridge:0.5.1
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./mcp-bridge-config.json:/mcp_bridge/config.json
+    depends_on:
+      - localai
+      - tool-containers-mcp
+  tool-containers-mcp:
+    image: ghcr.io/mgoltzsche/tool-containers-mcp:0.5.0 # dev
+    command:
+      - --address=:9090
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+  localai:
+    image: localai/localai:v4.1.2-gpu-vulkan
+    ports:
+      - "8080:8080"
+    volumes:
+      - 'localai-models:/models:z'
+      - 'localai-backends:/backends:z'
+    privileged: true
+
+volumes:
+  localai-models:
+  localai-backends:

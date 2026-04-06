@@ -14,6 +14,16 @@ default: help
 tool-containers-mcp: ## Build the binary.
 	CGO_ENABLED=0 go build -o "$(DIST_DIR)/tool-containers-mcp" -ldflags '-s -w -extldflags "-static"' ./cmd/tool-containers-mcp
 
+.PHONY: tool-containers-mcp
+container: tool-containers-mcp ## Build the container image.
+	docker build --force-rm -t ghcr.io/mgoltzsche/tool-containers-mcp:dev .
+
+compose: container ## Run the compose stack.
+	docker compose up
+
+compose-test-request: ## Run an inference test request.
+	curl -fsS http://localhost:9000/v1/chat/completions -H "Content-Type: application/json" -d '{"model": "qwen3-4b", "messages": [{"role": "user", "content": "Which tools do you have access to?"}]}' | jq .
+
 .PHONY: test
 test: ## Run the tests.
 	go test -cover ./...

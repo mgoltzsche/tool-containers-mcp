@@ -1,0 +1,18 @@
+{
+    "inference_server": {
+        "base_url": "http://localai:8080/v1",
+        "api_key": "None"
+    },
+    "mcp_servers": {
+        "tool-containers": {
+            "url": "http://tool-containers-mcp:9090/sse"
+        }
+    },
+    "network": {
+        "host": "0.0.0.0",
+        "port": 9000
+    },
+    "logging": {
+        "log_level": "DEBUG"
+    }
+}

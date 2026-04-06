@@ -63,3 +63,17 @@ Build a snapshot release (without publishing it):
 make snapshot
 ```
 
+Run the docker compose example (using [LocalAI](https://github.com/mudler/localai) for inference and [MCP-Bridge](https://github.com/SecretiveShell/MCP-Bridge) as agent):
+```sh
+make compose
+```
+
+Run an example inference query against MCP-Bridge's OpenAI-compatible Chat Completion API (within another terminal):
+```sh
+curl -fsS http://localhost:9000/v1/chat/completions -H "Content-Type: application/json" -d '{
+	"model": "qwen3-4b",
+	"messages": [
+		{"role": "user", "content": "Which tools do you have access to?"}
+	]
+}' | jq .
+```
