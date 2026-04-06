@@ -77,12 +77,18 @@ func run() error {
 
 		slog.Info("serving MCP via HTTP", "address", listenAddress)
 
+		getServer := func(req *http.Request) *mcp.Server {
+			return server
+		}
+		mux := http.NewServeMux()
+
+		mux.Handle("/stream", mcp.NewStreamableHTTPHandler(getServer, nil))
+		mux.Handle("/sse", mcp.NewSSEHandler(getServer, nil))
+
 		srv := &http.Server{
 			Addr:              listenAddress,
 			ReadHeaderTimeout: 7 * time.Second,
-			Handler: mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
-				return server
-			}, nil),
+			Handler:           mux,
 		}
 		go func() {
 			<-ctx.Done()

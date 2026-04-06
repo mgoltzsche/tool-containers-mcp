@@ -34,6 +34,13 @@ go install github.com/mgoltzsche/tool-containers-mcp/cmd/tool-containers-mcp@lat
 }
 ```
 
+## Via HTTP
+
+MCP can also be served via HTTP by specifying e.g. `--address=:9090`.
+There are two HTTP endpoints, one for each transport variant:
+* `/sse` - MCP via SSE.
+* `/stream` - MCP via streamable HTTP.
+
 # Development
 
 To build the binary for the host architecture using Go, run:
