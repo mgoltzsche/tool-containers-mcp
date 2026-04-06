@@ -18,19 +18,28 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func New() (engine.HandlerFactory, error) {
+type ImagePullPolicy string
+
+const (
+	ImagePullPolicyNever  ImagePullPolicy = "never"
+	ImagePullPolicyAlways ImagePullPolicy = "always"
+)
+
+func New(pullPolicy ImagePullPolicy) (engine.HandlerFactory, error) {
 	c, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
 
 	return &docker{
-		client: c,
+		client:     c,
+		pullPolicy: pullPolicy,
 	}, nil
 }
 
 type docker struct {
-	client client.APIClient
+	client     client.APIClient
+	pullPolicy ImagePullPolicy
 }
 
 func (e *docker) Close() error {
@@ -38,15 +47,21 @@ func (e *docker) Close() error {
 }
 
 func (e *docker) NewHandler(ctx context.Context, toolName, imageRef string) (engine.ToolHandler, error) {
-	slog.Info("pulling tool container image", "tool", toolName, "image", imageRef)
+	switch e.pullPolicy {
+	case ImagePullPolicyAlways:
+		slog.Info("pulling tool container image", "tool", toolName, "image", imageRef)
 
-	reader, err := e.client.ImagePull(ctx, imageRef, client.ImagePullOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("pull image: %w", err)
+		reader, err := e.client.ImagePull(ctx, imageRef, client.ImagePullOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("pull image: %w", err)
+		}
+
+		defer reader.Close()
+		_, _ = io.Copy(io.Discard, reader)
+	case ImagePullPolicyNever:
+	default:
+		return nil, fmt.Errorf("unsupported pull policy %q provided, expected one of %s or %s", e.pullPolicy, ImagePullPolicyNever, ImagePullPolicyAlways)
 	}
-
-	defer reader.Close()
-	_, _ = io.Copy(io.Discard, reader)
 
 	return func(ctx context.Context, c config.Container) (*mcp.CallToolResult, error) {
 		env := make([]string, 0, len(c.Env))

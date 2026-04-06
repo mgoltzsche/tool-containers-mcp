@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -20,6 +21,14 @@ import (
 var Version = "0.0.0-dev"
 
 var errLogged = false
+
+const serverModeStdin = "stdin"
+
+// Flags
+var configFile = "/etc/tool-containers-mcp/tools.yaml"
+var showVersion = false
+var listenAddress = serverModeStdin
+var pullPolicy = string(docker.ImagePullPolicyAlways)
 
 func main() {
 	if err := run(); err != nil {
@@ -47,8 +56,6 @@ func run() error {
 			time.Sleep(time.Second)
 			cancel()
 		}()
-	} else {
-		slog.Info("serving MCP via stdin/stdout")
 	}
 
 	defer closer()
@@ -57,24 +64,56 @@ func run() error {
 		server.AddTool(tool.Tool, tool.Handler)
 	}
 
-	return server.Run(ctx, &mcp.StdioTransport{})
+	switch listenAddress {
+	case serverModeStdin:
+		if err == nil {
+			slog.Info("serving MCP via stdin/stdout")
+		}
+		return server.Run(ctx, &mcp.StdioTransport{})
+	default:
+		if err != nil {
+			return err
+		}
+
+		slog.Info("serving MCP via HTTP", "address", listenAddress)
+
+		srv := &http.Server{
+			Addr: listenAddress,
+			Handler: mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
+				return server
+			}, nil),
+		}
+		go func() {
+			<-ctx.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			slog.Info("terminating")
+			if e := srv.Shutdown(ctx); e != nil {
+				slog.Error(fmt.Sprintf("shutdown: %s", e))
+			}
+		}()
+		err = srv.ListenAndServe()
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	}
 }
 
-func initMCPTools(ctx context.Context) ([]tools.Tool, func() error, error) {
-	configFile := "/etc/tool-containers-mcp/tools.yaml"
-	showVersion := false
-
+func parseFlags() error {
 	f := flag.CommandLine
 	f.StringVar(&configFile, "config", configFile, "path to the configuration file")
+	f.StringVar(&listenAddress, "address", listenAddress, "address to listen on: stdin or (IP and) port, e.g. :8080")
+	f.StringVar(&pullPolicy, "pull", pullPolicy, "container image pull policy: never or always")
 	f.BoolVar(&showVersion, "version", false, "print the binary version and exit")
 
 	err := f.Parse(os.Args[1:])
 	if err != nil {
-		return nil, noopClose, err
+		return err
 	}
 
 	if f.NArg() > 0 {
-		return nil, noopClose, fmt.Errorf("no positional arguments supported but %d provided", len(f.Args()))
+		return fmt.Errorf("no positional arguments supported but %d provided", len(f.Args()))
 	}
 
 	if showVersion {
@@ -82,12 +121,21 @@ func initMCPTools(ctx context.Context) ([]tools.Tool, func() error, error) {
 		os.Exit(0)
 	}
 
+	return nil
+}
+
+func initMCPTools(ctx context.Context) ([]tools.Tool, func() error, error) {
+	err := parseFlags()
+	if err != nil {
+		return nil, noopClose, err
+	}
+
 	cfg, err := config.ConfigurationFromFile(configFile)
 	if err != nil {
 		return nil, noopClose, err
 	}
 
-	factory, err := docker.New()
+	factory, err := docker.New(docker.ImagePullPolicy(pullPolicy))
 	if err != nil {
 		return nil, noopClose, err
 	}
