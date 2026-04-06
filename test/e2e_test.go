@@ -67,7 +67,8 @@ func TestMCP_initialization_error_should_surface_in_client(t *testing.T) {
 }
 
 func TestMCP_via_http(t *testing.T) {
-	port := 10000 + rand.IntN(30000)
+	port := 10000 + rand.IntN(30000) // nolint:gosec
+	// nolint:gosec
 	cmd := exec.CommandContext(t.Context(), "../build/dist/tool-containers-mcp", "--config=fake-tools.yaml", fmt.Sprintf("--address=127.0.0.1:%d", port), "--pull=never")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

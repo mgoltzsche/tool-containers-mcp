@@ -58,7 +58,7 @@ func run() error {
 		}()
 	}
 
-	defer closer()
+	defer func() { _ = closer() }()
 
 	for _, tool := range toolImpls {
 		server.AddTool(tool.Tool, tool.Handler)
@@ -78,7 +78,8 @@ func run() error {
 		slog.Info("serving MCP via HTTP", "address", listenAddress)
 
 		srv := &http.Server{
-			Addr: listenAddress,
+			Addr:              listenAddress,
+			ReadHeaderTimeout: 7 * time.Second,
 			Handler: mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
 				return server
 			}, nil),
