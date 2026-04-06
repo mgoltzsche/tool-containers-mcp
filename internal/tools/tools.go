@@ -1,28 +1,25 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"maps"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/mgoltzsche/tool-containers-mcp/internal/config"
-	"github.com/moby/moby/api/pkg/stdcopy"
-	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/client"
+	"github.com/mgoltzsche/tool-containers-mcp/internal/engine"
+	"github.com/mgoltzsche/tool-containers-mcp/internal/utils"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type HandlerFactoryFunc = func(ctx context.Context, toolName, imageRef string) (engine.ToolHandler, error)
 
 type Tool struct {
 	Tool    *mcp.Tool
@@ -31,7 +28,7 @@ type Tool struct {
 
 var nameNormalizationRegex = regexp.MustCompile("[^a-zA-Z0-6]+")
 
-func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]Tool, error) {
+func ToMCPServerTools(ctx context.Context, toolDefs map[string]config.ToolDefinition, newHandler HandlerFactoryFunc) ([]Tool, error) {
 	tools := make([]Tool, 0, len(toolDefs))
 	toolNames := slices.Sorted(maps.Keys(toolDefs))
 
@@ -84,13 +81,18 @@ func ToMCPServerTools(toolDefs map[string]config.ToolDefinition) ([]Tool, error)
 			inputSchema.Properties[paramName] = paramSchema
 		}
 
+		handler, err := toolHandler(ctx, toolName, t, newHandler)
+		if err != nil {
+			return nil, err
+		}
+
 		tools = append(tools, Tool{
 			Tool: &mcp.Tool{
 				Name:        toolName,
 				Description: t.Description,
 				InputSchema: inputSchema,
 			},
-			Handler: toolHandler(toolName, t),
+			Handler: handler,
 		})
 	}
 
@@ -128,146 +130,48 @@ func toMCPParameterSchema(p config.Parameter) (*jsonschema.Schema, error) {
 	return schema, nil
 }
 
-func toolError(msg string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
-		IsError: true,
+func toolHandler(ctx context.Context, toolName string, tool config.ToolDefinition, newHandler HandlerFactoryFunc) (mcp.ToolHandler, error) {
+	handler, err := newHandler(ctx, toolName, tool.Container.Image)
+	if err != nil {
+		return nil, fmt.Errorf("create %s tool: %w", toolName, err)
 	}
-}
 
-func toolHandler(toolName string, tool config.ToolDefinition) mcp.ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		c := tool.Container
-
-		env := make([]string, 0, len(c.Env)+len(tool.Parameters))
-		for k, v := range c.Env {
-			env = append(env, fmt.Sprintf("%s=%s", k, v))
-		}
-
 		paramEnvVars, err := paramsToEnvVars(tool.Parameters, request)
 		if err != nil {
-			return toolError(err.Error()), nil
+			return utils.ToolError(err.Error()), nil
 		}
 
-		env = append(env, paramEnvVars...)
-
-		timeout := c.Timeout
-		if timeout == 0 {
-			timeout = 60 * time.Second
+		env := make(map[string]string, len(tool.Container.Env)+len(paramEnvVars))
+		for k, v := range tool.Container.Env {
+			env[k] = v
 		}
 
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
+		for k, v := range paramEnvVars {
+			env[k] = v
+		}
 
-		cli, err := client.New(client.FromEnv)
+		container := tool.Container
+		container.Env = env
+
+		result, err := handler(ctx, container)
 		if err != nil {
-			return nil, fmt.Errorf("failed to use %s tool: create docker client: %w", toolName, err)
-		}
-		defer cli.Close()
-
-		reader, err := cli.ImagePull(ctx, c.Image, client.ImagePullOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to use %s tool: pull image: %w", toolName, err)
+			return nil, fmt.Errorf("failed to call %s tool: %w", toolName, err)
 		}
 
-		defer reader.Close()
-		_, _ = io.Copy(io.Discard, reader)
-
-		containerConfig := &container.Config{
-			Image: c.Image,
-			Cmd:   c.Args,
-			Env:   env,
-		}
-
-		if c.Command != "" {
-			containerConfig.Entrypoint = []string{c.Command}
-		}
-
-		resp, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-			Config: containerConfig,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to use %s tool: failed to create container: %w", toolName, err)
-		}
-
-		defer func() {
-			_, err := cli.ContainerRemove(ctx, resp.ID, client.ContainerRemoveOptions{
-				Force:         true,
-				RemoveVolumes: true,
-			})
-			if err != nil {
-				slog.Warn(fmt.Sprintf("failed to remove tool container: %s", err))
-			}
-		}()
-
-		if _, err := cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
-			return nil, fmt.Errorf("failed to use %s tool: failed to start container: %w", toolName, err)
-		}
-
-		waitResult := cli.ContainerWait(ctx, resp.ID, client.ContainerWaitOptions{
-			Condition: container.WaitConditionNotRunning,
-		})
-		select {
-		case err := <-waitResult.Error:
-			if err != nil {
-				return nil, fmt.Errorf("failed to use %s tool: %w%s", toolName, err, errDetails(ctx, resp.ID, cli))
-			}
-		case result := <-waitResult.Result:
-			if result.StatusCode != 0 {
-				return toolError(fmt.Sprintf("failed to use %s tool: exited with %d%s", toolName, result.StatusCode, errDetails(ctx, resp.ID, cli))), nil
-			}
-		}
-
-		out, err := cli.ContainerLogs(ctx, resp.ID, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true})
-		if err != nil {
-			return nil, fmt.Errorf("failed to read the output of %s tool: %w", toolName, err)
-		}
-
-		defer out.Close()
-
-		var stdout, stderr bytes.Buffer
-
-		_, err = stdcopy.StdCopy(&stdout, &stderr, out)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read the output of %s tool: %w", toolName, err)
-		}
-
-		for _, line := range strings.Split(strings.TrimSpace(stderr.String()), "\n") {
-			if line != "" {
-				slog.Warn(fmt.Sprintf("%s tool: %s", toolName, line))
-			}
-		}
-
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(stdout.String())}},
-		}, nil
-	}
+		return result, nil
+	}, nil
 }
 
-func errDetails(ctx context.Context, containerID string, c *client.Client) string {
-	suffix := ""
-	out, e := c.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{ShowStderr: true})
-	if e == nil {
-		defer out.Close()
-		var stdout, stderr bytes.Buffer
-		_, _ = stdcopy.StdCopy(&stdout, &stderr, out)
-		errLog := strings.TrimSpace(stderr.String())
-		if errLog != "" {
-			suffix = fmt.Sprintf(", stderr: %s", errLog)
-		}
-	}
-	return suffix
-}
-
-func paramsToEnvVars(paramDefinitions map[string]config.Parameter, request *mcp.CallToolRequest) ([]string, error) {
-	env := make([]string, len(paramDefinitions))
+func paramsToEnvVars(paramDefinitions map[string]config.Parameter, request *mcp.CallToolRequest) (map[string]string, error) {
+	env := make(map[string]string, len(paramDefinitions))
 	args := map[string]any{}
 	err := json.Unmarshal(request.Params.Arguments, &args)
 	if err != nil {
 		return nil, fmt.Errorf("parse params: %w", err)
 	}
 
-	for i, name := range slices.Sorted(maps.Keys(paramDefinitions)) {
+	for _, name := range slices.Sorted(maps.Keys(paramDefinitions)) {
 		p := paramDefinitions[name]
 		var v string
 		arg, ok := args[name]
@@ -300,8 +204,8 @@ func paramsToEnvVars(paramDefinitions map[string]config.Parameter, request *mcp.
 			}
 		}
 
-		key := strings.ToUpper(nameNormalizationRegex.ReplaceAllString(name, "_"))
-		env[i] = fmt.Sprintf("PARAM_%s=%v", strings.ToUpper(key), v)
+		name = strings.ToUpper(nameNormalizationRegex.ReplaceAllString(name, "_"))
+		env[fmt.Sprintf("PARAM_%s", name)] = v
 	}
 
 	return env, nil

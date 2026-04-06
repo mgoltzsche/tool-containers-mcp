@@ -50,3 +50,14 @@ func TestMCP(t *testing.T) {
 		require.Equal(t, "fake tool result", result.Content[0].(*mcp.TextContent).Text, "result content")
 	})
 }
+
+func TestMCP_initialization_error_should_surface_in_client(t *testing.T) {
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
+	transport := &mcp.CommandTransport{Command: exec.Command(
+		// TODO: make this work without having to rely on externally built binary
+		//"go", "run", filepath.Join("..", "cmd", "tool-containers-mcp", "main.go", "--config=tools.yaml"),
+		"../build/dist/tool-containers-mcp", "--config=non-existing-file.yaml",
+	)}
+	_, err := mcpClient.Connect(t.Context(), transport, nil)
+	require.ErrorContains(t, err, "tool-containers-mcp: read config: open non-existing-file.yaml: no such file or directory")
+}

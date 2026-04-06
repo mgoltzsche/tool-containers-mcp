@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mgoltzsche/tool-containers-mcp/internal/config"
+	"github.com/mgoltzsche/tool-containers-mcp/internal/engine/docker"
 	"github.com/mgoltzsche/tool-containers-mcp/internal/tools"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -35,7 +36,7 @@ func run() error {
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "tool-containers-mcp", Version: Version}, nil)
 
-	toolImpls, err := initMCPTools()
+	toolImpls, closer, err := initMCPTools(ctx)
 	if err != nil {
 		server.AddReceivingMiddleware(failingMiddleware(err))
 		go func() {
@@ -46,7 +47,11 @@ func run() error {
 			time.Sleep(time.Second)
 			cancel()
 		}()
+	} else {
+		slog.Info("serving MCP via stdin/stdout")
 	}
+
+	defer closer()
 
 	for _, tool := range toolImpls {
 		server.AddTool(tool.Tool, tool.Handler)
@@ -55,7 +60,7 @@ func run() error {
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
-func initMCPTools() ([]tools.Tool, error) {
+func initMCPTools(ctx context.Context) ([]tools.Tool, func() error, error) {
 	configFile := "/etc/tool-containers-mcp/tools.yaml"
 	showVersion := false
 
@@ -65,11 +70,11 @@ func initMCPTools() ([]tools.Tool, error) {
 
 	err := f.Parse(os.Args[1:])
 	if err != nil {
-		return nil, err
+		return nil, noopClose, err
 	}
 
 	if f.NArg() > 0 {
-		return nil, fmt.Errorf("no positional arguments supported but %d provided", len(f.Args()))
+		return nil, noopClose, fmt.Errorf("no positional arguments supported but %d provided", len(f.Args()))
 	}
 
 	if showVersion {
@@ -79,10 +84,26 @@ func initMCPTools() ([]tools.Tool, error) {
 
 	cfg, err := config.ConfigurationFromFile(configFile)
 	if err != nil {
-		return nil, err
+		return nil, noopClose, err
 	}
 
-	return tools.ToMCPServerTools(cfg.Tools)
+	factory, err := docker.New()
+	if err != nil {
+		return nil, noopClose, err
+	}
+
+	toolImpls, err := tools.ToMCPServerTools(ctx, cfg.Tools, factory.NewHandler)
+	if err != nil {
+		_ = factory.Close()
+
+		return nil, noopClose, err
+	}
+
+	return toolImpls, factory.Close, nil
+}
+
+func noopClose() error {
+	return nil
 }
 
 // failingMiddleware return the given error for every MCP request.
