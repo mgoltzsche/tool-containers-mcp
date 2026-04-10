@@ -16,10 +16,10 @@ tool-containers-mcp: ## Build the binary.
 
 .PHONY: tool-containers-mcp
 container: tool-containers-mcp ## Build the container image.
-	docker build --force-rm -t ghcr.io/mgoltzsche/tool-containers-mcp:dev .
+	docker build --force-rm --build-arg=TARGETPLATFORM=./build/dist -t ghcr.io/mgoltzsche/tool-containers-mcp:dev .
 
 compose: container ## Run the compose stack.
-	docker compose up
+	docker compose up --force-recreate --remove-orphans
 
 compose-test-request: ## Run an inference test request.
 	curl -fsS http://localhost:9000/v1/chat/completions -H "Content-Type: application/json" -d '{"model": "qwen3-4b", "messages": [{"role": "user", "content": "Which tools do you have access to?"}]}' | jq .
