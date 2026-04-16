@@ -88,7 +88,7 @@ func run() error {
 		srv := &http.Server{
 			Addr:              listenAddress,
 			ReadHeaderTimeout: 7 * time.Second,
-			Handler:           mux,
+			Handler:           withHTTPRequestLogger(mux),
 		}
 		go func() {
 			<-ctx.Done()
@@ -108,10 +108,13 @@ func run() error {
 }
 
 func parseFlags() error {
+	logLevelStr := "info"
+
 	f := flag.CommandLine
 	f.StringVar(&configFile, "config", configFile, "path to the configuration file")
 	f.StringVar(&listenAddress, "address", listenAddress, "address to listen on: stdin or (IP and) port, e.g. :8080")
 	f.StringVar(&pullPolicy, "pull", pullPolicy, "container image pull policy: never or always")
+	f.StringVar(&logLevelStr, "log-level", logLevelStr, "set the log level (debug, info, warn, error)")
 	f.BoolVar(&showVersion, "version", false, "print the binary version and exit")
 
 	err := f.Parse(os.Args[1:])
@@ -127,6 +130,13 @@ func parseFlags() error {
 		fmt.Println("tool-containers-mcp", Version)
 		os.Exit(0)
 	}
+
+	var logLevel slog.Level
+	err = logLevel.UnmarshalText([]byte(logLevelStr))
+	if err != nil {
+		return fmt.Errorf("invalid --log-level %q provided: %w", logLevelStr, err)
+	}
+	slog.SetLogLoggerLevel(logLevel)
 
 	return nil
 }
@@ -174,4 +184,24 @@ func failingMiddleware(err error) mcp.Middleware {
 			return nil, err
 		}
 	}
+}
+
+func withHTTPRequestLogger(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+
+		h.ServeHTTP(&requestLogger{
+			ResponseWriter: w,
+			req:            req,
+		}, req)
+	})
+}
+
+type requestLogger struct {
+	http.ResponseWriter
+	req *http.Request
+}
+
+func (h *requestLogger) WriteHeader(statusCode int) {
+	slog.Debug("http request", "method", h.req.Method, "path", h.req.RequestURI, "status", statusCode)
+	h.ResponseWriter.WriteHeader(statusCode)
 }
