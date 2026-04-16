@@ -1,4 +1,11 @@
 services:
+  statelesschatui:
+    image: ghcr.io/mgoltzsche/statelesschatui:0.1.2
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_BASE_URL: http://mcp-bridge:9000/v1
+      OPENAI_MODELS_BASE_URL: http://localai:8080/v1
   mcp-bridge:
     image: ghcr.io/secretiveshell/mcp-bridge/mcp-bridge:0.5.1
     ports:
