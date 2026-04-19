@@ -82,7 +82,7 @@ func run() error {
 		}
 		mux := http.NewServeMux()
 
-		mux.Handle("/stream", mcp.NewStreamableHTTPHandler(getServer, nil))
+		mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(getServer, nil))
 		mux.Handle("/sse", mcp.NewSSEHandler(getServer, nil))
 
 		srv := &http.Server{
