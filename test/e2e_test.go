@@ -3,6 +3,7 @@ package test
 import (
 	//"path/filepath"
 	"bytes"
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"os/exec"
@@ -43,7 +44,7 @@ func TestMCP(t *testing.T) {
 		},
 		{
 			name:      "HTTP stream",
-			transport: &mcp.StreamableClientTransport{Endpoint: fmt.Sprintf("http://127.0.0.1:%d/stream", testPort)},
+			transport: &mcp.StreamableClientTransport{Endpoint: fmt.Sprintf("http://127.0.0.1:%d/mcp", testPort)},
 		},
 		{
 			name:      "SSE",
@@ -52,7 +53,9 @@ func TestMCP(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mcpClient := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
-			session, err := mcpClient.Connect(t.Context(), tc.transport, nil)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			session, err := mcpClient.Connect(ctx, tc.transport, nil)
 			require.NoErrorf(t, err, "server log:\n%s", serverLog.String())
 
 			defer session.Close()
@@ -96,6 +99,8 @@ func TestMCP_initialization_error_should_surface_in_client(t *testing.T) {
 		//"go", "run", filepath.Join("..", "cmd", "tool-containers-mcp", "main.go", "--config=tools.yaml"),
 		"../build/dist/tool-containers-mcp", "--config=non-existing-file.yaml",
 	)}
-	_, err := mcpClient.Connect(t.Context(), transport, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, err := mcpClient.Connect(ctx, transport, nil)
 	require.ErrorContains(t, err, "tool-containers-mcp: read config: open non-existing-file.yaml: no such file or directory")
 }

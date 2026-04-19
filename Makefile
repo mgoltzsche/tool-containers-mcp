@@ -26,7 +26,7 @@ compose-test-request: ## Run an inference test request.
 
 .PHONY: test
 test: ## Run the tests.
-	go test -cover ./...
+	go test -timeout 3m -cover ./...
 
 .PHONY: lint
 lint: $(GOLANGCI_LINT) ## Run the linters.

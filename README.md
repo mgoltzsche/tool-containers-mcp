@@ -39,7 +39,7 @@ go install github.com/mgoltzsche/tool-containers-mcp/cmd/tool-containers-mcp@lat
 MCP can also be served via HTTP by specifying e.g. `--address=:9090`.
 There are two HTTP endpoints, one for each transport variant:
 * `/sse` - MCP via SSE.
-* `/stream` - MCP via streamable HTTP.
+* `/mcp` - MCP via streamable HTTP.
 
 # Development
 

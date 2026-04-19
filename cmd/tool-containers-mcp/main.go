@@ -205,3 +205,9 @@ func (h *requestLogger) WriteHeader(statusCode int) {
 	slog.Debug("http request", "method", h.req.Method, "path", h.req.RequestURI, "status", statusCode)
 	h.ResponseWriter.WriteHeader(statusCode)
 }
+
+func (h *requestLogger) Flush() {
+	if f, ok := h.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
