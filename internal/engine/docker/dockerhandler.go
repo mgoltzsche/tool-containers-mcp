@@ -87,8 +87,16 @@ func (e *docker) NewHandler(ctx context.Context, toolName, imageRef string) (eng
 			containerConfig.Entrypoint = []string{c.Command}
 		}
 
+		var hostConfig *container.HostConfig
+		if c.Network != "" {
+			hostConfig = &container.HostConfig{
+				NetworkMode: container.NetworkMode(c.Network),
+			}
+		}
+
 		resp, err := e.client.ContainerCreate(ctx, client.ContainerCreateOptions{
-			Config: containerConfig,
+			Config:     containerConfig,
+			HostConfig: hostConfig,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create tool container: %w", err)

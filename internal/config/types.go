@@ -28,7 +28,9 @@ type Container struct {
 	Command string            `yaml:"command,omitempty"`
 	Args    []string          `yaml:"args,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"`
-	Timeout time.Duration     `yaml:"timeout,omitempty"`
+	// Network specifies the network mode, e.g. 'host' or 'none'
+	Network string        `yaml:"network,omitempty"`
+	Timeout time.Duration `yaml:"timeout,omitempty"`
 }
 
 type Parameter struct {
